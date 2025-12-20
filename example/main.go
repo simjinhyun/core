@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/simjinhyun/x"
 )
@@ -13,8 +14,19 @@ func finalize() {
 	fmt.Println("Finalize: 리소스 정리, 로그 flush 등")
 }
 func handler(c *x.Context) {
-	fmt.Fprintln(c.Res, "YEP")
+	// 클라이언트 주소 확인
+	peer := c.Req.RemoteAddr
+	ua := c.Req.Header.Get("User-Agent")
+
+	// localhost(127.0.0.1)에서 오고, User-Agent가 curl일 때만 출력
+	if strings.HasPrefix(peer, "127.0.0.1") && strings.Contains(strings.ToLower(ua), "curl") {
+		fmt.Fprintln(c.Res, x.ConfigX)
+	} else {
+		// 조건 불일치 시 다른 응답
+		fmt.Fprintln(c.Res, "access denied")
+	}
 }
+
 func OnShutdownErr(err error) {
 	fmt.Println(err)
 }
