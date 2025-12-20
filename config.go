@@ -15,6 +15,8 @@ type Config struct {
 	Values map[string]any
 }
 
+var ConfigX *Config
+
 // String : 원본 JSON 문자열 그대로 반환
 func (c Config) String() string {
 	return c.Data
@@ -28,10 +30,11 @@ func LoadConfig(path string) *Config {
 	if err := json.Unmarshal(data, &values); err != nil {
 		panic(err)
 	}
-	return &Config{
+	ConfigX = &Config{
 		Data:   string(data),
 		Values: values,
 	}
+	return ConfigX
 }
 
 /*
