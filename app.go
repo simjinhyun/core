@@ -68,7 +68,7 @@ func NewApp() *App {
 		OnSignal:        make(map[os.Signal]func()),
 		OnUnknownSignal: func(sig os.Signal) {},
 		Conf: map[string]any{
-			"Addr":     "7000",
+			"Addr":     "localhost:7000",
 			"WebRoot":  ".",
 			"LogLevel": "DEBUG",
 			"TimeZone": "Asia/Seoul",
