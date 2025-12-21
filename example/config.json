@@ -1,4 +1,6 @@
 {
     "Addr": "localhost:7000",
-    "WebRoot": "."
+    "WebRoot": ".",
+    "LogLevel": "DEBUG",
+    "TimeZone": "Asia/Seoul"
 }

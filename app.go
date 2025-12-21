@@ -56,11 +56,8 @@ type App struct {
 	OnSignal        map[os.Signal]func()
 	OnUnknownSignal func(os.Signal)
 	server          *http.Server
-	ConfRaw         []byte
 	Conf            map[string]any
 }
-
-var defaultAddr = ":8080"
 
 // 앱 생성자
 func NewApp() *App {
@@ -70,7 +67,12 @@ func NewApp() *App {
 		OnShutdownErr:   func(err error) {},
 		OnSignal:        make(map[os.Signal]func()),
 		OnUnknownSignal: func(sig os.Signal) {},
-		Conf:            map[string]any{"Addr": defaultAddr},
+		Conf: map[string]any{
+			"Addr":     "7000",
+			"WebRoot":  ".",
+			"LogLevel": "DEBUG",
+			"TimeZone": "Asia/Seoul",
+		},
 	}
 
 	helper := func(w http.ResponseWriter, r *http.Request) {
@@ -104,31 +106,18 @@ func NewApp() *App {
 func (a *App) LoadConfig(path string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		log.Printf("config load error: %v, fallback to default", err)
+		log.Printf("설정파일 (%s) 읽기 실패. 기본값 사용", path)
 		return
 	}
 
-	a.ConfRaw = data
 	var values map[string]any
-	if err := json.Unmarshal(a.ConfRaw, &values); err != nil {
-		log.Printf("config parse error: %v, fallback to default", err)
+	if err := json.Unmarshal(data, &values); err != nil {
+		log.Printf("%s 파일 파싱 실패. 기본값 사용", path)
 		return
 	}
 
 	// 기본값 유지하면서 덮어쓰기
 	maps.Copy(a.Conf, values)
-
-	// Addr 키가 없으면 기본값 보장
-	if _, ok := a.Conf["Addr"]; !ok {
-		log.Printf("config missing Addr, fallback to default")
-		a.Conf["Addr"] = defaultAddr
-	}
-
-	// WebRoot 키가 없으면 기본값 보장
-	if _, ok := a.Conf["WebRoot"]; !ok {
-		log.Printf("config missing WebRoot, fallback to current directory")
-		a.Conf["WebRoot"] = "." // 현재 디렉토리를 기본 루트로
-	}
 }
 
 func checkIndexFiles(root string) {
@@ -163,6 +152,16 @@ func (a *App) Run() {
 
 	//서버실행
 	a.LoadConfig(*configFile)
+
+	// 타임존 적용
+	if tz, ok := a.Conf["TimeZone"].(string); ok {
+		loc, err := time.LoadLocation(tz)
+		if err != nil {
+			log.Fatalf("invalid timezone %s: %v", tz, err)
+		}
+		time.Local = loc
+	}
+
 	a.server.Addr = a.Conf["Addr"].(string)
 	// 웹루트 검사
 	if root, ok := a.Conf["WebRoot"].(string); ok {
