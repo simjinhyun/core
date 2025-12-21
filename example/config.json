@@ -1,11 +1,4 @@
 {
     "Addr": "localhost:7000",
-    "Addr1": "localhost:7000",
-    "Addr2": "localhost:7000",
-    "Addr3": "localhost:7000",
-    "Addr4": "localhost:7000",
-    "Addr5": "localhost:7000",
-    "Addr6": "localhost:7000",
-    "Addr7": "localhost:7000",
-    "Addr8": "localhost:7000"
+    "WebRoot": "."
 }

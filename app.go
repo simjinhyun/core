@@ -2,135 +2,230 @@ package x
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io/fs"
+	"log"
+	"maps"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 )
 
-// 앱 구조체
-type App struct {
-	Initialize     func()
-	RequestHandler func(*Context)
-	Finalize       func()
-	OnShutdownErr  func(error)
-	server         *http.Server
+// AppError 구조체
+type AppError struct {
+	Code string         // 에러 코드 (예: "RecordNotFound", "ParameterRequired")
+	File string         // 발생 파일
+	Line int            // 발생 라인
+	Err  error          // 원본 에러
+	Data map[string]any // 메시지 조립용 데이터
 }
 
+// Panic 메서드
+func (e *AppError) Panic() {
+	panic(e)
+}
+
+// 헬퍼 함수: 에러 생성
+func NewAppError(code string, err error, data map[string]any) *AppError {
+	_, file, line, _ := runtime.Caller(1)
+	return &AppError{
+		Code: code,
+		File: file,
+		Line: line,
+		Err:  err,
+		Data: data,
+	}
+}
+
+// String 메서드 (디버깅용)
+func (e *AppError) Error() string {
+	return fmt.Sprintf("[%s] %s:%d %v", e.Code, e.File, e.Line, e.Err)
+}
+
+// 앱 구조체
+type App struct {
+	Initialize      func()
+	Finalize        func()
+	OnShutdownErr   func(error)
+	OnSignal        map[os.Signal]func()
+	OnUnknownSignal func(os.Signal)
+	server          *http.Server
+	ConfRaw         []byte
+	Conf            map[string]any
+}
+
+var defaultAddr = ":8080"
+
 // 앱 생성자
-func NewApp(
-	initialize func(),
-	requestHandler func(*Context),
-	finalize func(),
-	onShutdownErr func(error),
-) *App {
-	if initialize == nil {
-		initialize = func() {}
-	}
-	if finalize == nil {
-		finalize = func() {}
-	}
-	if onShutdownErr == nil {
-		onShutdownErr = func(err error) {}
+func NewApp() *App {
+	app := &App{
+		Initialize:      func() {},
+		Finalize:        func() {},
+		OnShutdownErr:   func(err error) {},
+		OnSignal:        make(map[os.Signal]func()),
+		OnUnknownSignal: func(sig os.Signal) {},
+		Conf:            map[string]any{"Addr": defaultAddr},
 	}
 
 	helper := func(w http.ResponseWriter, r *http.Request) {
-		requestHandler(NewContext(w, r))
+		ctx := NewContext(app, w, r) // 이제 app을 전달 가능
+		defer func() {
+			if rec := recover(); rec != nil {
+				var appErr *AppError
+				switch e := rec.(type) {
+				case *AppError:
+					appErr = e
+				case error:
+					appErr = NewAppError("RuntimeError", e, nil)
+				default:
+					appErr = NewAppError("RuntimeError", fmt.Errorf("%v", rec), nil)
+				}
+				ctx.AppError = appErr
+			}
+			ctx.Reply()
+		}()
+		GetRouter().ServeHTTP(ctx)
 	}
 
-	return &App{
-		Initialize:     initialize,
-		RequestHandler: requestHandler,
-		Finalize:       finalize,
-		OnShutdownErr:  onShutdownErr,
-		server: &http.Server{
-			Handler: http.HandlerFunc(helper),
-		},
+	app.server = &http.Server{
+		Handler: http.HandlerFunc(helper),
 	}
+
+	return app
 }
 
-const Pipe = "x.pipe"
-
-// ----------------------------------------------------
-// Run : 서버 실행 메인 함수
-// ----------------------------------------------------
-func (a *App) Run() {
-	//CLI 옵션 파싱
-	configFile := flag.String("f", "config.json", "설정파일경로")
-	T := flag.Bool("T", false, "설정파일보기")
-	flag.Parse()
-
-	//실제 로딩된 설정파일내용 응답
-	if *T {
-		ShowConfig()
+// 설정 로딩
+func (a *App) LoadConfig(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		log.Printf("config load error: %v, fallback to default", err)
 		return
 	}
 
-	//서버실행
-	cx := LoadConfig(*configFile)
-
-	Debug("서버리스닝")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel() // 필요할 때 cancel() 호출하면 ReadPipe 고루틴 종료
-
-	err := ReadPipe(ctx, Pipe, func(data []byte) {
-		Debug(fmt.Sprintf("ReadPipe %s", data))
-		WritePipe(string(data), []byte(cx.Data+"\n"))
-		WritePipe(string(data), []byte("EXIT\n"))
-	})
-	if err != nil {
-		Debug("ReadPipe 에러: " + err.Error())
+	a.ConfRaw = data
+	var values map[string]any
+	if err := json.Unmarshal(a.ConfRaw, &values); err != nil {
+		log.Printf("config parse error: %v, fallback to default", err)
+		return
 	}
 
-	Debug("앱초기화")
-	// --- 서버 모드 (기본 실행) ---
-	a.server.Addr = cx.Values["Addr"].(string)
+	// 기본값 유지하면서 덮어쓰기
+	maps.Copy(a.Conf, values)
+
+	// Addr 키가 없으면 기본값 보장
+	if _, ok := a.Conf["Addr"]; !ok {
+		log.Printf("config missing Addr, fallback to default")
+		a.Conf["Addr"] = defaultAddr
+	}
+
+	// WebRoot 키가 없으면 기본값 보장
+	if _, ok := a.Conf["WebRoot"]; !ok {
+		log.Printf("config missing WebRoot, fallback to current directory")
+		a.Conf["WebRoot"] = "." // 현재 디렉토리를 기본 루트로
+	}
+}
+
+func checkIndexFiles(root string) {
+	missingCount := 0
+
+	filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			index := filepath.Join(path, "index.html")
+			if _, err := os.Stat(index); err != nil {
+				log.Printf("warning: directory %s has no index.html", path)
+				missingCount++
+			}
+		}
+		return nil
+	})
+
+	if missingCount > 0 {
+		log.Printf("total %d directories are missing index.html", missingCount)
+	} else {
+		log.Printf("all directories have index.html")
+	}
+}
+
+// 앱 실행
+func (a *App) Run() {
+	//CLI 옵션 파싱
+	configFile := flag.String("f", "config.json", "설정파일경로")
+	flag.Parse()
+
+	//서버실행
+	a.LoadConfig(*configFile)
+	a.server.Addr = a.Conf["Addr"].(string)
+	// 웹루트 검사
+	if root, ok := a.Conf["WebRoot"].(string); ok {
+		checkIndexFiles(root)
+	}
 	a.Initialize()
 
-	// HTTP 서버 실행
 	go func() {
-
 		err := a.server.ListenAndServe()
 		if err != nil && err != http.ErrServerClosed {
-			panic(fmt.Errorf("http server failed: %w", err))
+			log.Fatal("http server failed: ", err)
 		}
 	}()
 
 	a.Wait()
 }
 
+// 시그널 콜백 등록
+func (a *App) RegisterSignal(sig os.Signal, handler func()) {
+	a.OnSignal[sig] = handler
+}
+
+func (a *App) HandleJSON(path string, h HandlerFunc) {
+	GetRouter().HandleJSON(path, h)
+}
+
+func (a *App) HandleHTML(path string, h HandlerFunc) {
+	GetRouter().HandleHTML(path, h)
+}
+
+// 시그널 처리
 func (a *App) Wait() {
 	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM, syscall.SIGUSR1)
+	signal.Notify(stop)
 
 	for {
 		sig := <-stop
 
 		switch sig {
 		case syscall.SIGINT, syscall.SIGTERM:
-			a.Finalize()
-
-			_ = os.Remove(Pipe)
-
-			ctx, cancel := context.WithTimeout(
-				context.Background(),
-				5*time.Second,
-			)
-			defer cancel()
-
-			if err := a.server.Shutdown(ctx); err != nil {
-				a.OnShutdownErr(err)
-			}
+			a.Shutdown()
 			return
-
-		case syscall.SIGUSR1:
-			fmt.Println("Received SIGUSR1.")
-
 		default:
-			fmt.Println("Ignoring signal:", sig)
+			if handler, ok := a.OnSignal[sig]; ok {
+				handler()
+			} else {
+				a.OnUnknownSignal(sig)
+			}
 		}
 	}
+}
+
+func (a *App) Shutdown() {
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		5*time.Second,
+	)
+	defer cancel()
+
+	if err := a.server.Shutdown(ctx); err != nil {
+		a.OnShutdownErr(err)
+	}
+
+	// 서버가 정상적으로 내려간 뒤에 파이널 작업 실행
+	a.Finalize()
 }

@@ -1,80 +1,65 @@
 package x
 
-import (
-	"context"
-	"io"
-	"os"
-	"syscall"
-)
+// var aeads []cipher.AEAD
+// var rrIdx uint32 // 라운드 로빈 인덱스 (atomic)
 
-func ReadFile(path string) []byte {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		panic(err)
-	}
-	return data
-}
+// func init() {
+// 	// 5개의 고정 키
+// 	keys := [][]byte{
+// 		[]byte("0123456789ABCDEF0123456789ABCDEF"),
+// 		[]byte("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+// 		[]byte("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"),
+// 		[]byte("CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"),
+// 		[]byte("DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"),
+// 	}
 
-func WriteFile(path string, content []byte) {
-	if err := os.WriteFile(path, content, 0644); err != nil {
-		panic(err)
-	}
-}
+// 	// 각 키마다 aead 생성
+// 	for _, key := range keys {
+// 		block, err := aes.NewCipher(key)
+// 		if err != nil {
+// 			panic(err)
+// 		}
+// 		a, err := cipher.NewGCM(block)
+// 		if err != nil {
+// 			panic(err)
+// 		}
+// 		aeads = append(aeads, a)
+// 	}
+// }
 
-func Debug(msg string) {
-	println(msg)
-}
+// func encrypt(plaintext []byte) []byte {
+// 	// 라운드 로빈 인덱스 선택
+// 	idx := atomic.AddUint32(&rrIdx, 1) % uint32(len(aeads))
+// 	aead := aeads[idx]
 
-func WritePipe(pipePath string, data []byte) error {
-	f, err := os.OpenFile(pipePath, os.O_WRONLY, 0)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
+// 	nonce := make([]byte, aead.NonceSize())
+// 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+// 		panic(err)
+// 	}
+// 	ciphertext := aead.Seal(nil, nonce, plaintext, nil)
 
-	if _, err := f.Write(data); err != nil {
-		return err
-	}
-	return nil
-}
+// 	// 암호문 앞에 idx를 1바이트로 붙여서 어떤 키인지 표시
+// 	return append([]byte{byte(idx)}, append(nonce, ciphertext...)...)
+// }
 
-func ReadPipe(
-	ctx context.Context,
-	pipePath string,
-	handler func(data []byte),
-) error {
-	// FIFO 생성
-	if err := syscall.Mkfifo(pipePath, 0600); err != nil && !os.IsExist(err) {
-		return err
-	}
+// func decrypt(output []byte) []byte {
+// 	idx := int(output[0]) // 첫 바이트가 key index
+// 	aead := aeads[idx]
 
-	go func() {
-		defer os.Remove(pipePath) // 종료 시 파이프 제거
+// 	ns := aead.NonceSize()
+// 	nonce, ct := output[1:1+ns], output[1+ns:]
+// 	plaintext, err := aead.Open(nil, nonce, ct, nil)
+// 	if err != nil {
+// 		panic(err)
+// 	}
+// 	return plaintext
+// }
 
-		for {
-			select {
-			case <-ctx.Done():
-				// context 취소 → 고루틴 종료
-				return
-			default:
-				f, err := os.OpenFile(pipePath, os.O_RDONLY, 0600)
-				if err != nil {
-					// 에러 발생 시 잠시 대기 후 재시도
-					continue
-				}
+// func main() {
+// 	msg := []byte("Hello, Round Robin AES!")
+// 	ct := encrypt(msg)
+// 	fmt.Printf("암호문: %x\n", ct)
 
-				b, err := io.ReadAll(f)
-				f.Close()
-				if err != nil {
-					continue
-				}
-
-				if len(b) > 0 {
-					handler(b)
-				}
-			}
-		}
-	}()
-
-	return nil
-}
+// 	pt := decrypt(ct)
+// 	fmt.Printf("복호문: %s\n", pt)
+// }
