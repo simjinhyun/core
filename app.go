@@ -6,7 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
-	"log"
+	"log/slog"
 	"maps"
 	"net/http"
 	"os"
@@ -57,6 +57,7 @@ type App struct {
 	OnUnknownSignal func(os.Signal)
 	server          *http.Server
 	Conf            map[string]any
+	Logger          *slog.Logger
 }
 
 // 앱 생성자
@@ -73,6 +74,10 @@ func NewApp() *App {
 			"LogLevel": "DEBUG",
 			"TimeZone": "Asia/Seoul",
 		},
+		Logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			Level:     slog.LevelDebug, // 디버그까지 출력
+			AddSource: true,            // file:line 포함
+		})),
 	}
 
 	helper := func(w http.ResponseWriter, r *http.Request) {
@@ -106,13 +111,13 @@ func NewApp() *App {
 func (a *App) LoadConfig(path string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		log.Printf("설정파일 (%s) 읽기 실패. 기본값 사용", path)
+		a.Logger.Info("설정파일 (%s) 읽기 실패. 기본값 사용", "path", path)
 		return
 	}
 
 	var values map[string]any
 	if err := json.Unmarshal(data, &values); err != nil {
-		log.Printf("%s 파일 파싱 실패. 기본값 사용", path)
+		a.Logger.Info("파일 파싱 실패. 기본값 사용", "path", path)
 		return
 	}
 
@@ -121,16 +126,18 @@ func (a *App) LoadConfig(path string) {
 }
 
 func checkIndexFiles(root string) {
+	slog.Debug(root)
 	missingCount := 0
 
 	filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		slog.Debug(path)
 		if err != nil {
 			return nil
 		}
 		if d.IsDir() {
 			index := filepath.Join(path, "index.html")
 			if _, err := os.Stat(index); err != nil {
-				log.Printf("warning: directory %s has no index.html", path)
+				slog.Info("warning: directory %s has no index.html", "path", path)
 				missingCount++
 			}
 		}
@@ -138,9 +145,9 @@ func checkIndexFiles(root string) {
 	})
 
 	if missingCount > 0 {
-		log.Printf("total %d directories are missing index.html", missingCount)
+		slog.Info(fmt.Sprintf("total %d directories are missing index.html", missingCount))
 	} else {
-		log.Printf("all directories have index.html")
+		slog.Info("all directories have index.html")
 	}
 }
 
@@ -157,14 +164,16 @@ func (a *App) Run() {
 	if tz, ok := a.Conf["TimeZone"].(string); ok {
 		loc, err := time.LoadLocation(tz)
 		if err != nil {
-			log.Fatalf("invalid timezone %s: %v", tz, err)
+			a.Logger.Error("invalid timezone %s: %v", "tz", tz, "err", err)
 		}
 		time.Local = loc
 	}
 
 	a.server.Addr = a.Conf["Addr"].(string)
 	// 웹루트 검사
+	a.Logger.Debug(a.Conf["WebRoot"].(string))
 	if root, ok := a.Conf["WebRoot"].(string); ok {
+		a.Logger.Debug(root)
 		checkIndexFiles(root)
 	}
 	a.Initialize()
@@ -172,7 +181,7 @@ func (a *App) Run() {
 	go func() {
 		err := a.server.ListenAndServe()
 		if err != nil && err != http.ErrServerClosed {
-			log.Fatal("http server failed: ", err)
+			a.Logger.Error("http server failed: ", "err", err)
 		}
 	}()
 

@@ -1,6 +1,7 @@
 package x
 
 import (
+	"log/slog"
 	"net/http"
 	"path/filepath"
 )
@@ -40,6 +41,7 @@ func (r *Router) HandleHTML(path string, h HandlerFunc) {
 }
 
 func (r *Router) ServeHTTP(c *Context) {
+	slog.Debug(c.Req.URL.Path)
 	if route, ok := r.routes[c.Req.URL.Path]; ok {
 		route.Handler(c)
 		return
@@ -48,6 +50,8 @@ func (r *Router) ServeHTTP(c *Context) {
 	// App 설정에서 WebRoot 가져오기
 	root := c.App.Conf["WebRoot"].(string)
 	path := filepath.Join(root, c.Req.URL.Path)
+
+	slog.Info(path)
 
 	http.ServeFile(c.Res, c.Req, path)
 }

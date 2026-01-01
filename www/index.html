@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ko">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>관리자 UI 레이아웃</title>
+    <!-- 외부 CSS -->
+    <link rel="stylesheet" href="style.css">
+    <!-- jQuery CDN -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <!-- 외부 JS -->
+    <script src="script.js" defer></script>
+</head>
+
+<body>
+    <header>
+        <button class="hamburger" onclick="toggleMenu()">☰</button>
+        헤더
+    </header>
+
+    <main id="app"></main>
+    <footer>푸터</footer>
+
+    <!-- 사이드 메뉴 -->
+    <nav class="sidebar" id="sidebar">
+        <h2>메뉴</h2>
+        <ul>
+            <li><a href="#">대시보드</a></li>
+            <li><a href="#">사용자 관리</a></li>
+            <li><a href="#">설정</a></li>
+        </ul>
+        <button onclick="showAlert('알림 메시지입니다.')">알림 띄우기</button><br>
+        <button onclick="showConfirm('정말 진행하시겠습니까?',()=>alert('확인'),()=>alert('취소'))">컨펌 띄우기</button><br>
+        <button onclick="loadPageModal()">모달 띄우기</button><br>
+        <button onclick="showToast('토스트메세지')">토스트 띄우기</button>
+    </nav>
+
+    <!-- 공유 overlay -->
+    <div class="overlay" id="overlay" onclick="closeSidebar();closeModal();"></div>
+
+    <!-- 공용 모달 -->
+    <div class="modal" id="commonModal">
+        <div class="modal-body"></div>
+        <div class="modal-footer"></div>
+    </div>
+</body>
+
+</html>
