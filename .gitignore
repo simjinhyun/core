@@ -12,7 +12,7 @@
 *.test
 chat/*
 clichat/*
-example/x
+example/example
 # Code coverage profiles and other test artifacts
 *.out
 coverage.*

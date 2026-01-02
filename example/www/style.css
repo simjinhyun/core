@@ -1,0 +1,86 @@
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    height: 100%;
+    margin: 0;
+}
+
+body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+header,
+footer {
+    background: #1f2937;
+    color: #fff;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+}
+
+header .hamburger {
+    font-size: 1.5rem;
+    cursor: pointer;
+    margin-right: 12px;
+    background: none;
+    border: none;
+    color: inherit;
+}
+
+main {
+    flex: 1;
+    min-height: 0;
+    padding: 16px;
+    background: #fff;
+}
+
+.sidebar {
+    position: fixed;
+    top: 0;
+    left: -250px;
+    width: 250px;
+    height: 100%;
+    background: #374151;
+    color: #fff;
+    padding: 20px;
+    z-index: 1000;
+}
+
+.overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.4);
+    display: none;
+    z-index: 900;
+}
+
+.modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: #fff;
+    padding: 24px;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    z-index: 1001;
+    display: none;
+    width: 300px;
+    max-height: 80vh;
+    overflow-y: auto;
+    text-align: center;
+}
+
+.modal-footer button {
+    margin: 8px;
+}
