@@ -9,9 +9,10 @@ import (
 type HandlerFunc func(*Context)
 
 type Route struct {
-	Path    string
-	Type    string // "json" or "html"
-	Handler HandlerFunc
+	Path     string
+	Method   string
+	Type     string
+	Handlers []HandlerFunc
 }
 
 type Router struct {
@@ -32,20 +33,39 @@ func NewRouter(WebRoot string) *Router {
 	}
 }
 
-func (r *Router) HandleJSON(path string, h HandlerFunc) {
-	r.routes[path] = &Route{Path: path, Type: "json", Handler: h}
+// JSON 응답용 라우트 등록
+func (r *Router) HandleJSON(method, path string, handlers ...HandlerFunc) {
+	r.routes[method+" "+path] = &Route{
+		Path:     path,
+		Method:   method,
+		Type:     "JSON",
+		Handlers: handlers,
+	}
 }
 
-func (r *Router) HandleHTML(path string, h HandlerFunc) {
-	r.routes[path] = &Route{Path: path, Type: "html", Handler: h}
+// HTML 응답용 라우트 등록
+func (r *Router) HandleHTML(method, path string, handlers ...HandlerFunc) {
+	r.routes[method+" "+path] = &Route{
+		Path:     path,
+		Method:   method,
+		Type:     "HTML",
+		Handlers: handlers,
+	}
 }
 
 func (r *Router) ServeHTTP(c *Context) {
-	c.App.Logger.Debug("[REQ]", "Path", c.Req.URL.Path)
-	if route, ok := r.routes[c.Req.URL.Path]; ok {
-		route.Handler(c)
+	key := c.Req.Method + " " + c.Req.URL.Path
+
+	if route, ok := r.routes[key]; ok {
+		c.RouteType = route.Type
+		// 등록된 핸들러들을 순서대로 실행
+		for _, h := range route.Handlers {
+			h(c)
+		}
 		return
 	}
+
+	// 등록된 라우트가 없으면 정적 파일 제공
 	path := filepath.Join(r.WebRoot, c.Req.URL.Path)
 	http.ServeFile(c.Res, c.Req, path)
 }

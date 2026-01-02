@@ -24,5 +24,12 @@ func main() {
 		"mysql",
 		"root:Tldrmf#2013@tcp(10.0.0.200:3306)/testdb?timeout=5s&readTimeout=30s&writeTimeout=30s",
 	)
+
+	a.Router.HandleJSON("GET", "/hello", Hello)
+
 	a.Run("localhost:7000")
+}
+
+func Hello(c *x.Context) {
+	c.Response.Data = "Hello World"
 }

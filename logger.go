@@ -45,7 +45,7 @@ func (h *CustomHandler) Handle(_ context.Context, r slog.Record) error {
 	}
 
 	// 공통 헤더 출력
-	fmt.Fprintf(h.writer, "%s %-5s %s %s", ts, r.Level.String(), src, r.Message)
+	fmt.Fprintf(h.writer, "%s %-5s %-20s %s", ts, r.Level.String(), src, r.Message)
 
 	// Attrs를 JSON으로 직렬화
 	attrs := make(map[string]any)
