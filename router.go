@@ -2,6 +2,7 @@ package x
 
 import (
 	"net/http"
+	"os"
 	"path/filepath"
 )
 
@@ -14,11 +15,21 @@ type Route struct {
 }
 
 type Router struct {
-	routes map[string]*Route
+	WebRoot string
+	routes  map[string]*Route
 }
 
-func NewRouter() *Router {
-	return &Router{routes: make(map[string]*Route)}
+func NewRouter(WebRoot string) *Router {
+	if WebRoot == "" {
+		WebRoot = "./www"
+	}
+	if err := os.MkdirAll(WebRoot, 0755); err != nil {
+		panic(err)
+	}
+	return &Router{
+		WebRoot: WebRoot,
+		routes:  make(map[string]*Route),
+	}
 }
 
 func (r *Router) HandleJSON(path string, h HandlerFunc) {
@@ -30,11 +41,11 @@ func (r *Router) HandleHTML(path string, h HandlerFunc) {
 }
 
 func (r *Router) ServeHTTP(c *Context) {
-	c.App.Logger.Debug("", "요청경로", c.Req.URL.Path)
+	c.App.Logger.Debug("[REQ]", "Path", c.Req.URL.Path)
 	if route, ok := r.routes[c.Req.URL.Path]; ok {
 		route.Handler(c)
 		return
 	}
-	path := filepath.Join(c.App.Conf.WebRoot, c.Req.URL.Path)
+	path := filepath.Join(r.WebRoot, c.Req.URL.Path)
 	http.ServeFile(c.Res, c.Req, path)
 }

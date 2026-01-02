@@ -9,65 +9,42 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 )
 
-type Config struct {
-	Addr        string
-	WebRoot     string
-	LogLevel    slog.Level
-	LogTimeZone string
-}
-
 // 앱 구조체
 type App struct {
+	Server          *http.Server
 	Initialize      func()
 	Finalize        func()
 	OnShutdownErr   func(error)
 	OnSignal        map[os.Signal]func()
 	OnUnknownSignal func(os.Signal)
-	Server          *http.Server
-	Conf            *Config
-	Logger          *slog.Logger
 	Conns           map[string]*sql.DB
 	Router          *Router
+	Logger          *slog.Logger
+	Handler         *CustomHandler
 }
 
 // 앱 생성자
-func NewApp(config *Config) *App {
-	if config.WebRoot == "" {
-		config.WebRoot = "./www"
-	}
-	if err := os.MkdirAll(config.WebRoot, 0755); err != nil {
-		panic(err)
-	}
-	loc, _ := time.LoadLocation(config.LogTimeZone)
+func NewApp(WebRoot string) *App {
 	app := &App{
 		Initialize:      func() {},
 		Finalize:        func() {},
 		OnShutdownErr:   func(err error) {},
 		OnSignal:        make(map[os.Signal]func()),
 		OnUnknownSignal: func(sig os.Signal) {},
-		Conf:            config,
-		Logger: slog.New(slog.NewTextHandler(
-			os.Stdout,
-			&slog.HandlerOptions{
-				Level: config.LogLevel,
-				ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-					if a.Key == slog.TimeKey {
-						if t, ok := a.Value.Any().(time.Time); ok {
-							return slog.Time(a.Key, t.In(loc))
-						}
-					}
-					return a
-				},
-			},
-		)),
-		Conns:  map[string]*sql.DB{},
-		Router: NewRouter(),
+		Conns:           map[string]*sql.DB{},
+		Router:          NewRouter(WebRoot),
 	}
-
+	app.SetLogger(
+		slog.LevelInfo,
+		"",
+		"2006.01.02 15:04:05 (MST)",
+	)
+	app.CreateIndexFiles(WebRoot)
 	app.Server = &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			c := NewContext(app, w, r)
@@ -77,12 +54,16 @@ func NewApp(config *Config) *App {
 	}
 	return app
 }
+func (a *App) SetLogger(l slog.Level, tz string, layout string) {
+	a.Logger, a.Handler = NewLogger(l, tz, layout)
+}
 
-func (a *App) CreateIndexFiles() {
-	root := a.Conf.WebRoot
-	filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		abs, _ := filepath.Abs(path)
-		a.Logger.Debug("경로", "path", abs, "dir", d)
+func (a *App) SetLevel(l slog.Level) {
+	a.Handler.level.Set(l)
+	a.Logger.Info("LogLevel changed", "Level", a.Handler.GetLevel())
+}
+func (a *App) CreateIndexFiles(WebRoot string) {
+	filepath.WalkDir(WebRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -97,14 +78,16 @@ func (a *App) CreateIndexFiles() {
 }
 
 // 앱 실행
-func (a *App) Run() {
-	a.Server.Addr = a.Conf.Addr
-	a.CreateIndexFiles()
+func (a *App) Run(Addr string) {
+	a.Server.Addr = Addr
 	a.Initialize()
 
-	a.Logger.Info("App initialized.")
+	a.Logger.Info("Logger", "Level", a.Handler.GetLevel())
+	a.Logger.Info("Logger", "Timezone", a.Handler.GetTimezone())
+	a.Logger.Info("App initialized")
 
 	go func() {
+		a.Logger.Info("App listening", "Addr", Addr)
 		err := a.Server.ListenAndServe()
 		if err != nil && err != http.ErrServerClosed {
 			panic(err)
@@ -154,8 +137,8 @@ func (a *App) Shutdown() {
 
 	// 서버가 정상적으로 내려간 뒤에 파이널 작업 실행
 	a.Finalize()
+	a.Logger.Info("App finalized")
 	a.RemoveConns()
-	a.Logger.Info("App finalized.")
 }
 
 func (a *App) RemoveConns() {
@@ -164,6 +147,7 @@ func (a *App) RemoveConns() {
 			if err := conn.Close(); err != nil {
 				a.Logger.Warn("failed to close db connection", "key", key, "err", err)
 			}
+			a.Logger.Info("Connection removed", "key", key)
 		}
 	}
 }
@@ -177,9 +161,36 @@ func (a *App) AddConn(key, driver, dsn string) {
 		panic(err)
 	}
 	a.Conns[key] = db
+	a.Logger.Info("Connection added", "key", key)
 }
 
 // 커넥션 가져오기
 func (a *App) GetConn(key string) *sql.DB {
 	return a.Conns[key]
+}
+
+// AppError 구조체
+type AppError struct {
+	Code string         // 에러 코드 (예: "RecordNotFound", "ParameterRequired")
+	File string         // 발생 파일
+	Line int            // 발생 라인
+	Err  error          // 원본 에러
+	Data map[string]any // 메시지 조립용 데이터
+}
+
+// Panic 메서드
+func (e *AppError) Panic() {
+	panic(e)
+}
+
+// 헬퍼 함수: 에러 생성
+func NewAppError(code string, err error, data map[string]any) *AppError {
+	_, file, line, _ := runtime.Caller(1)
+	return &AppError{
+		Code: code,
+		File: file,
+		Line: line,
+		Err:  err,
+		Data: data,
+	}
 }
