@@ -3,6 +3,7 @@ package x
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -54,6 +55,7 @@ func NewApp(WebRoot string) *App {
 	}
 	return app
 }
+
 func (a *App) SetLogger(l slog.Level, tz string, layout string) {
 	a.Logger, a.Handler = NewLogger(l, tz, layout)
 }
@@ -65,12 +67,20 @@ func (a *App) SetLevel(l slog.Level) {
 func (a *App) CreateIndexFiles(WebRoot string) {
 	filepath.WalkDir(WebRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil
+			panic(err)
 		}
+
 		if d.IsDir() {
 			index := filepath.Join(path, "index.html")
-			if _, err := os.Stat(index); err != nil {
-				_ = os.WriteFile(index, []byte{}, 0644)
+			_, statErr := os.Stat(index)
+
+			if os.IsNotExist(statErr) {
+				writeErr := os.WriteFile(index, []byte{}, 0644)
+				if writeErr != nil {
+					panic(writeErr)
+				}
+			} else if statErr != nil {
+				panic(statErr)
 			}
 		}
 		return nil
@@ -78,7 +88,7 @@ func (a *App) CreateIndexFiles(WebRoot string) {
 }
 
 // 앱 실행
-func (a *App) Run(Addr string) {
+func (a *App) Run(Addr string, shutdownTimeout time.Duration) {
 	a.Server.Addr = Addr
 	a.Initialize()
 
@@ -94,7 +104,7 @@ func (a *App) Run(Addr string) {
 		}
 	}()
 
-	a.Wait()
+	a.Wait(shutdownTimeout)
 }
 
 // 시그널 콜백 등록
@@ -103,7 +113,7 @@ func (a *App) RegisterSignal(sig os.Signal, handler func()) {
 }
 
 // 시그널 처리
-func (a *App) Wait() {
+func (a *App) Wait(shutdownTimeout time.Duration) {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop)
 
@@ -112,7 +122,7 @@ func (a *App) Wait() {
 
 		switch sig {
 		case syscall.SIGINT, syscall.SIGTERM:
-			a.Shutdown()
+			a.Shutdown(shutdownTimeout)
 			return
 		default:
 			if handler, ok := a.OnSignal[sig]; ok {
@@ -124,10 +134,10 @@ func (a *App) Wait() {
 	}
 }
 
-func (a *App) Shutdown() {
+func (a *App) Shutdown(shutdownTimeout time.Duration) {
 	ctx, cancel := context.WithTimeout(
 		context.Background(),
-		5*time.Second,
+		shutdownTimeout*time.Second,
 	)
 	defer cancel()
 
@@ -171,9 +181,8 @@ func (a *App) GetConn(key string) *sql.DB {
 
 // AppError 구조체
 type AppError struct {
-	Code string         // 에러 코드 (예: "RecordNotFound", "ParameterRequired")
-	File string         // 발생 파일
-	Line int            // 발생 라인
+	Code string // 에러 코드 (예: "RecordNotFound", "ParameterRequired")
+	Src  string
 	Err  error          // 원본 에러
 	Data map[string]any // 메시지 조립용 데이터
 }
@@ -188,8 +197,7 @@ func NewAppError(code string, err error, data map[string]any) *AppError {
 	_, file, line, _ := runtime.Caller(1)
 	return &AppError{
 		Code: code,
-		File: file,
-		Line: line,
+		Src:  fmt.Sprintf("%s:%d", filepath.Base(file), line),
 		Err:  err,
 		Data: data,
 	}

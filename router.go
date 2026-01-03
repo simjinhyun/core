@@ -35,7 +35,13 @@ func NewRouter(WebRoot string) *Router {
 
 // JSON 응답용 라우트 등록
 func (r *Router) HandleJSON(method, path string, handlers ...HandlerFunc) {
-	r.routes[method+" "+path] = &Route{
+	key := method + " " + path
+
+	if _, ok := r.routes[key]; ok {
+		panic("router: route already registered: " + key)
+	}
+
+	r.routes[key] = &Route{
 		Path:     path,
 		Method:   method,
 		Type:     "JSON",
@@ -45,7 +51,13 @@ func (r *Router) HandleJSON(method, path string, handlers ...HandlerFunc) {
 
 // HTML 응답용 라우트 등록
 func (r *Router) HandleHTML(method, path string, handlers ...HandlerFunc) {
-	r.routes[method+" "+path] = &Route{
+	key := method + " " + path
+
+	if _, ok := r.routes[key]; ok {
+		panic("router: route already registered: " + key)
+	}
+
+	r.routes[key] = &Route{
 		Path:     path,
 		Method:   method,
 		Type:     "HTML",

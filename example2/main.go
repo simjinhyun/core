@@ -25,11 +25,15 @@ func main() {
 		"root:Tldrmf#2013@tcp(10.0.0.200:3306)/testdb?timeout=5s&readTimeout=30s&writeTimeout=30s",
 	)
 
-	a.Router.HandleJSON("GET", "/hello", Hello)
+	a.Router.HandleHTML("GET", "/hello", Hello)
 
-	a.Run("localhost:7000")
+	a.Run("localhost:7000", 5)
 }
 
 func Hello(c *x.Context) {
 	c.Response.Data = "Hello World"
+	// a := 0
+	// _ = 1 / a
+	panic("a")
+	// x.NewAppError("XXX", nil, nil).Panic()
 }

@@ -1,10 +1,13 @@
 package x
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -21,6 +24,7 @@ type Context struct {
 	Store     map[string]any //핸들러 체인들이 자유롭게 데이터 담을 수 있게
 	ReqID     string
 	ReqTime   time.Time
+	ReqBody   string
 	RemoteIP  string
 	Response  struct {
 		Code    string
@@ -41,8 +45,32 @@ func NewContext(a *App, w http.ResponseWriter, r *http.Request) *Context {
 		ReqTime:  now,
 		RemoteIP: getClientIP(r),
 	}
-	a.Logger.Debug("[REQ]"+c.ReqID, "Method", c.Req.Method, "Path", c.Req.URL.Path)
+	c.CopyBody()
 	return c
+}
+
+func (c *Context) CopyBody() {
+	if c.Req.Body == nil {
+		c.ReqBody = ""
+		return
+	}
+
+	ct := c.Req.Header.Get("Content-Type")
+	if strings.HasPrefix(ct, "multipart/") {
+		c.ReqBody = ""
+		return
+	}
+
+	// 최대 1MB까지만 읽기
+	bodyBytes, err := io.ReadAll(io.LimitReader(c.Req.Body, 1024*1024))
+	if err != nil {
+		c.ReqBody = ""
+		return
+	}
+
+	// Body 복원
+	c.Req.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+	c.ReqBody = string(bodyBytes)
 }
 
 func getClientIP(r *http.Request) string {
@@ -83,8 +111,10 @@ func (c *Context) Recover() {
 			appErr = e
 		case error:
 			appErr = NewAppError("RuntimeError", e, nil)
+			c.App.Logger.Error(fmt.Sprintf("%s", debug.Stack()))
 		default:
 			appErr = NewAppError("RuntimeError", fmt.Errorf("%v", rec), nil)
+			c.App.Logger.Error(fmt.Sprintf("%s", debug.Stack()))
 		}
 		c.AppError = appErr
 	} else {
@@ -102,16 +132,26 @@ func (c *Context) Reply() {
 	case "HTML":
 		c.ReplyHTML()
 	default:
-		// 정적 파일 서빙은 응답생략
+		// 정적 파일 서빙은 http.ServeFile 가 직접 응답함
 	}
-	c.App.Logger.Debug("[RES]"+c.ReqID, "Code", c.Response.Code)
+
+	//디버그 로그 (운영 성능 영향 제로)
+	c.App.Logger.Debug(
+		c.PrependReqID("[RES]"),
+		c.Req.Method, c.Req.URL.Path,
+		"AppError", c.AppError,
+		"Elapsed", c.Response.Elapsed,
+	)
+}
+
+func (c *Context) PrependReqID(msg string) string {
+	return fmt.Sprintf("%s %s", c.ReqID, msg)
 }
 
 func (c *Context) ReplyJSON() {
 	c.Res.Header().Set("Content-Type", "application/json; charset=utf-8")
 
 	if err := json.NewEncoder(c.Res).Encode(c.Response); err != nil {
-		// 여기서는 panic 걸면 안 되고 안전하게 fallback
 		http.Error(c.Res, err.Error(), http.StatusInternalServerError)
 	}
 }
