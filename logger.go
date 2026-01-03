@@ -44,8 +44,8 @@ func (h *CustomHandler) Handle(_ context.Context, r slog.Record) error {
 		src = fmt.Sprintf("(%s:%d)", filepath.Base(f.File), f.Line)
 	}
 
-	// 공통 헤더 출력
-	fmt.Fprintf(h.writer, "%s %-5s %-20s %s", ts, r.Level.String(), src, r.Message)
+	// 공통 헤더 출력 (src는 빼고)
+	fmt.Fprintf(h.writer, "%s %-5s %s", ts, r.Level.String(), r.Message)
 
 	// Attrs를 JSON으로 직렬화
 	attrs := make(map[string]any)
@@ -59,6 +59,11 @@ func (h *CustomHandler) Handle(_ context.Context, r slog.Record) error {
 	if len(attrs) > 0 {
 		b, _ := json.Marshal(attrs)
 		fmt.Fprintf(h.writer, " %s", b)
+	}
+
+	// 마지막에 src 붙이기
+	if src != "" {
+		fmt.Fprintf(h.writer, " %s", src)
 	}
 
 	fmt.Fprintln(h.writer)

@@ -62,7 +62,7 @@ func (a *App) SetLogger(l slog.Level, tz string, layout string) {
 
 func (a *App) SetLevel(l slog.Level) {
 	a.Handler.level.Set(l)
-	a.Logger.Info("LogLevel changed", "Level", a.Handler.GetLevel())
+	a.Logger.Info(PrependX("LogLevel changed"), "Level", a.Handler.GetLevel())
 }
 func (a *App) CreateIndexFiles(WebRoot string) {
 	filepath.WalkDir(WebRoot, func(path string, d fs.DirEntry, err error) error {
@@ -92,12 +92,12 @@ func (a *App) Run(Addr string, shutdownTimeout time.Duration) {
 	a.Server.Addr = Addr
 	a.Initialize()
 
-	a.Logger.Info("Logger", "Level", a.Handler.GetLevel())
-	a.Logger.Info("Logger", "Timezone", a.Handler.GetTimezone())
-	a.Logger.Info("App initialized")
+	a.Logger.Info(PrependX("Logger"), "Level", a.Handler.GetLevel())
+	a.Logger.Info(PrependX("Logger"), "Timezone", a.Handler.GetTimezone())
+	a.Logger.Info(PrependX("App initialized"))
 
 	go func() {
-		a.Logger.Info("App listening", "Addr", Addr)
+		a.Logger.Info(PrependX("App listening"), "Addr", Addr)
 		err := a.Server.ListenAndServe()
 		if err != nil && err != http.ErrServerClosed {
 			panic(err)
@@ -147,7 +147,7 @@ func (a *App) Shutdown(shutdownTimeout time.Duration) {
 
 	// 서버가 정상적으로 내려간 뒤에 파이널 작업 실행
 	a.Finalize()
-	a.Logger.Info("App finalized")
+	a.Logger.Info(PrependX("App finalized"))
 	a.RemoveConns()
 }
 
@@ -155,9 +155,9 @@ func (a *App) RemoveConns() {
 	for key, conn := range a.Conns {
 		if conn != nil {
 			if err := conn.Close(); err != nil {
-				a.Logger.Warn("failed to close db connection", "key", key, "err", err)
+				a.Logger.Warn(PrependX("failed to close db connection"), "key", key, "err", err)
 			}
-			a.Logger.Info("Connection removed", "key", key)
+			a.Logger.Info(PrependX("Connection removed"), "key", key)
 		}
 	}
 }
@@ -171,7 +171,7 @@ func (a *App) AddConn(key, driver, dsn string) {
 		panic(err)
 	}
 	a.Conns[key] = db
-	a.Logger.Info("Connection added", "key", key)
+	a.Logger.Info(PrependX("Connection added"), "key", key)
 }
 
 // 커넥션 가져오기

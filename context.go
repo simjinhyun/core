@@ -24,8 +24,9 @@ type Context struct {
 	Store     map[string]any //핸들러 체인들이 자유롭게 데이터 담을 수 있게
 	ReqID     string
 	ReqTime   time.Time
-	ReqBody   string
+	ReqBody   []byte
 	RemoteIP  string
+	Route     *Route
 	Response  struct {
 		Code    string
 		Message string
@@ -51,26 +52,26 @@ func NewContext(a *App, w http.ResponseWriter, r *http.Request) *Context {
 
 func (c *Context) CopyBody() {
 	if c.Req.Body == nil {
-		c.ReqBody = ""
+		c.ReqBody = nil
 		return
 	}
 
 	ct := c.Req.Header.Get("Content-Type")
 	if strings.HasPrefix(ct, "multipart/") {
-		c.ReqBody = ""
+		c.ReqBody = nil
 		return
 	}
 
 	// 최대 1MB까지만 읽기
 	bodyBytes, err := io.ReadAll(io.LimitReader(c.Req.Body, 1024*1024))
 	if err != nil {
-		c.ReqBody = ""
+		c.ReqBody = nil
 		return
 	}
 
 	// Body 복원
 	c.Req.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-	c.ReqBody = string(bodyBytes)
+	c.ReqBody = bodyBytes
 }
 
 func getClientIP(r *http.Request) string {
@@ -103,6 +104,8 @@ func getClientIP(r *http.Request) string {
 	return ip
 }
 
+var noErr = NewAppError("OK", nil, nil)
+
 func (c *Context) Recover() {
 	if rec := recover(); rec != nil {
 		var appErr *AppError
@@ -118,37 +121,28 @@ func (c *Context) Recover() {
 		}
 		c.AppError = appErr
 	} else {
-		c.AppError = NewAppError("OK", nil, nil)
+		c.AppError = noErr
 	}
-	c.Reply()
-}
 
-func (c *Context) Reply() {
 	c.Response.Code = c.AppError.Code
 	c.Response.Elapsed = time.Since(c.ReqTime).String()
-	switch c.RouteType {
-	case "JSON":
-		c.ReplyJSON()
-	case "HTML":
-		c.ReplyHTML()
-	default:
-		// 정적 파일 서빙은 http.ServeFile 가 직접 응답함
+
+	//정적파일 서빙은 ServeFile 함수가 직접 응답함.
+	if c.Route != nil {
+		c.Route.Reply(c)
 	}
 
 	//디버그 로그 (운영 성능 영향 제로)
 	c.App.Logger.Debug(
-		c.PrependReqID("[RES]"),
+		c.PrependXReqID("DONE"),
 		c.Req.Method, c.Req.URL.Path,
 		"AppError", c.AppError,
+		"ReqBody", string(c.ReqBody),
 		"Elapsed", c.Response.Elapsed,
 	)
 }
 
-func (c *Context) PrependReqID(msg string) string {
-	return fmt.Sprintf("%s %s", c.ReqID, msg)
-}
-
-func (c *Context) ReplyJSON() {
+func ReplyJSON(c *Context) {
 	c.Res.Header().Set("Content-Type", "application/json; charset=utf-8")
 
 	if err := json.NewEncoder(c.Res).Encode(c.Response); err != nil {
@@ -156,14 +150,15 @@ func (c *Context) ReplyJSON() {
 	}
 }
 
-func (c *Context) ReplyHTML() {
+func ReplyHTML(c *Context) {
 	c.Res.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	if c.Response.Code == "OK" {
 		if html, ok := c.Response.Data.(string); ok {
 			fmt.Fprint(c.Res, html)
 		} else {
-			c.ReplyJSON()
+			//응답데이터가 html 텍스트가 아니므로 JSON 마샬 응답
+			ReplyJSON(c)
 		}
 	} else {
 		fmt.Fprintf(
@@ -172,6 +167,34 @@ func (c *Context) ReplyHTML() {
 			c.Response.Code,
 		)
 	}
+}
+
+func (c *Context) Debug(msg string, args ...interface{}) {
+	c.App.Logger.Debug(c.PrependReqID(msg), args...)
+}
+
+func (c *Context) Info(msg string, args ...interface{}) {
+	c.App.Logger.Info(c.PrependReqID(msg), args...)
+}
+
+func (c *Context) Warn(msg string, args ...interface{}) {
+	c.App.Logger.Warn(c.PrependReqID(msg), args...)
+}
+
+func (c *Context) Error(msg string, args ...interface{}) {
+	c.App.Logger.Error(c.PrependReqID(msg), args...)
+}
+
+func (c *Context) PrependReqID(msg string) string {
+	return fmt.Sprintf("   [%s] %s", c.ReqID, msg)
+}
+
+func (c *Context) PrependXReqID(msg string) string {
+	return fmt.Sprintf("[X][%s] %s", c.ReqID, msg)
+}
+
+func PrependX(msg string) string {
+	return fmt.Sprintf("[X] %s", msg)
 }
 
 // 값 저장

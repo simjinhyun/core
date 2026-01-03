@@ -4,16 +4,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
+	"runtime"
 )
-
-type HandlerFunc func(*Context)
-
-type Route struct {
-	Path     string
-	Method   string
-	Type     string
-	Handlers []HandlerFunc
-}
 
 type Router struct {
 	WebRoot string
@@ -33,35 +26,27 @@ func NewRouter(WebRoot string) *Router {
 	}
 }
 
-// JSON 응답용 라우트 등록
-func (r *Router) HandleJSON(method, path string, handlers ...HandlerFunc) {
-	key := method + " " + path
+type HandlerFunc func(*Context)
 
-	if _, ok := r.routes[key]; ok {
-		panic("router: route already registered: " + key)
-	}
-
-	r.routes[key] = &Route{
-		Path:     path,
-		Method:   method,
-		Type:     "JSON",
-		Handlers: handlers,
-	}
+type Route struct {
+	Path         string
+	Method       string
+	Reply        HandlerFunc
+	Handlers     []HandlerFunc
+	HandlerNames []string
 }
 
-// HTML 응답용 라우트 등록
-func (r *Router) HandleHTML(method, path string, handlers ...HandlerFunc) {
-	key := method + " " + path
-
-	if _, ok := r.routes[key]; ok {
-		panic("router: route already registered: " + key)
+func (r *Router) AddRoute(method, path string, reply HandlerFunc, handlers ...HandlerFunc) {
+	names := make([]string, len(handlers))
+	for i, h := range handlers {
+		names[i] = runtime.FuncForPC(reflect.ValueOf(h).Pointer()).Name()
 	}
-
-	r.routes[key] = &Route{
-		Path:     path,
-		Method:   method,
-		Type:     "HTML",
-		Handlers: handlers,
+	r.routes[method+" "+path] = &Route{
+		Path:         path,
+		Method:       method,
+		Reply:        reply,
+		Handlers:     handlers,
+		HandlerNames: names,
 	}
 }
 
@@ -69,9 +54,9 @@ func (r *Router) ServeHTTP(c *Context) {
 	key := c.Req.Method + " " + c.Req.URL.Path
 
 	if route, ok := r.routes[key]; ok {
-		c.RouteType = route.Type
 		// 등록된 핸들러들을 순서대로 실행
-		for _, h := range route.Handlers {
+		for i, h := range route.Handlers {
+			c.App.Logger.Debug(c.PrependXReqID("CALL " + route.HandlerNames[i]))
 			h(c)
 		}
 		return
